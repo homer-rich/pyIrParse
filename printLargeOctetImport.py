@@ -159,6 +159,8 @@ def object_identifier_to_string(identifier):
 
 def value_to_string(tag_number, value, indent, output_stream, tag_class):
     if tag_number == asn1.Numbers.ObjectIdentifier:
+        # Reads in URLs that aren't properly translated
+        # These lines are just the characters printed with '.' in between each
         if tag_class == asn1.Classes.Context:
             asciiList = value.split('.')
             charList = []
@@ -176,7 +178,7 @@ def value_to_string(tag_number, value, indent, output_stream, tag_class):
             try:
                 return codecs.decode(value, "ascii")
             except:
-                return value.hex()
+                return value.hex().upper()
             
     elif tag_number == asn1.Numbers.UTF8String:
         try:
@@ -184,7 +186,9 @@ def value_to_string(tag_number, value, indent, output_stream, tag_class):
         except:
             return 'Failed UTF8: {}'.format(value)
     elif tag_number == asn1.Numbers.Integer:
-        return hex(value)
+        idFill = hex(value).lstrip('0x')
+        # Adds a leading zero if the hex values is odd in length. 0xA becomes 0x0A
+        return idFill if len(idFill) % 2 == 0 else idFill.zfill(len(idFill)+1)
     elif tag_number == asn1.Numbers.UTCTime:
         return strftime('%B %d %Y %H:%M:%S UTC', strptime(str(value), "%y%m%d%H%M%SZ"))
     elif isinstance(value, bytes):

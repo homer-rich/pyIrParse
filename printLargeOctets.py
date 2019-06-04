@@ -5,6 +5,8 @@ import asn1
 
 import printLargeOctetImport as ploi
 
+#def (self)
+
 certData = io.StringIO()
 decoder = asn1.Decoder()
 
@@ -17,31 +19,25 @@ with open(sys.argv[1], 'rb') as fileIr:
 
 # print(dir(certData))      
 certDataString = certData.getvalue()
+certDataLines = certDataString.splitlines()
 certData.close()
 
 
-buffer = -1
 certCount = 0
-for line in certDataString.splitlines():
-    '''
+for loc, line in enumerate(certDataLines):
+    
     if re.search('\[A\] 0x8', line):
-        buffer = 1
-        print(line)
+        print(certDataLines[loc+1])
 
-    if re.search('PRINTABLESTRING|UTF8 STRING|UTCTIME', line):
-        print(line)
 
-    if re.search('BIT STRING', line):
-        # print(line)
-        certCount += 1
+    #if re.search('PRINTABLESTRING|UTF8 STRING|UTCTIME', line):
+    #    print(line)
 
-    if buffer == 0 and re.search('https', line):
-        print('Line count: {} for {}'.format(certCount, line.strip()))
-        certCount = 0
-
-    if buffer >= 0:
-        buffer -= 1
-    '''
-    print(line)
+    if re.search('\[C\] 0x0', line) and re.search('\[C\] 0x0', certDataLines[loc+2]):
+        if not re.search('BOOLEAN', certDataLines[loc+4]):
+            print(certDataLines[loc+4])
+            certCount += 1
+    
+    #print(line)
 
 #print(certCount)

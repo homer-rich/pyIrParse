@@ -24,6 +24,8 @@ certData.close()
 
 
 certCount = 0
+certFlag = False
+certFlagString = ''
 for loc, line in enumerate(certDataLines):
     
     if re.search('\[A\] 0x8', line):
@@ -35,9 +37,26 @@ for loc, line in enumerate(certDataLines):
 
     if re.search('\[C\] 0x0', line) and re.search('\[C\] 0x0', certDataLines[loc+2]):
         if not re.search('BOOLEAN', certDataLines[loc+4]):
-            print(certDataLines[loc+4])
-            certCount += 1
-    
+            certFlagString += ('ID: {} '.format(certDataLines[loc+4].split(': ',1)[1]))
+            certFlag = True
+
+    if certFlag: 
+        if re.search('countryName', line):
+            certFlagJoiner = certDataLines[loc+1].split(': ', 1)[1]
+            certFlagString += 'Country:{}  '.format(certFlagJoiner)
+        if re.search('organizationName', line):
+            certFlagJoiner = certDataLines[loc+1].split(': ', 1)[1]
+            certFlagString += 'ON:{}  '.format(certFlagJoiner)
+        if re.search('organizationalUnitName', line):
+            certFlagJoiner = certDataLines[loc+1].split(': ', 1)[1]
+            certFlagString += 'OU:{}  '.format(certFlagJoiner)
+        if re.search('commonName', line):
+            certFlagJoiner = certDataLines[loc+1].split(': ', 1)[1]
+            certFlagString += 'CN:{}\n'.format(certFlagJoiner)
+            certFlag = False
+
+
     #print(line)
 
 #print(certCount)
+print(certFlagString)

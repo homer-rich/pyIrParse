@@ -13,6 +13,7 @@ class x509Template:
         self.certDates = []
         self.issuer = ''
         self.subject = ''
+        self.publicKey = ''
 
     def addIssuerOrSubject(self, data, isIssuer):
         if isIssuer:
@@ -66,7 +67,8 @@ for loc, line in enumerate(certDataLines):
 
     # Line containing TAMP URL, Group, and Store
     if lineTag.startswith('[A] 0x8'):
-        print(certDataLines[loc+1])
+        if futureTag(certDataLines[loc+1]).startswith('[C]'):
+            print(certDataLines[loc+1])
 
     # This denotes a standard cert, included in the different groups and stores
     if loc+4 < len(certDataLines) and lineTag == futureTag(certDataLines[loc+2]) == '[C] 0x0':
@@ -80,8 +82,7 @@ for loc, line in enumerate(certDataLines):
     
     try:
         if re.search('rsaEncryption', line):
-            do = False
-            # print('RSA Encryption: {}\n'.format(certDataLines[loc+2].split(': ', 1)[1][18:-10]))
+            tempTemplate.publicKey = 'RSA Encryption: {}\n'.format(certDataLines[loc+2].split(': ', 1)[1][18:-10])
     except:
         do = True
 
@@ -111,6 +112,7 @@ for loc, line in enumerate(certDataLines):
 for cert in certList:
     print('\nVersion:{}\nSerial Number: 0x{}'.format(cert.version, cert.certId))
     print('Issuer: {}\nValidity:'.format(cert.issuer))
+    print('Public Key: {}'.format(cert.publicKey))
     print('Not Before: {0[0]}\nNot After: {0[1]}'.format(cert.certDates))
     print('Subject: {}'.format(cert.subject))
 

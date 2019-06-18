@@ -29,6 +29,19 @@ class x509Template:
     def addDate(self, date):
         self.certDates.append(date)
 
+def futureTag(futureLine):
+    try:
+        return futureLine.split(': ',1)[0].strip()
+    except:
+        print('Failed Future Tag')
+        return ''
+def futureData(futureLine):
+    try:
+        return futureLine.split(': ',1)[1].strip()
+    except:
+        print('Failed Future Data')
+        return ''
+
 certData = io.StringIO()
 decoder = asn1.Decoder()
 
@@ -48,16 +61,22 @@ certIssuerFlag = False
 certList = []
 tempTemplate = None
 for loc, line in enumerate(certDataLines):
-    
-    if re.search('\[A\] 0x8', line):
+    lineTag = line.split(': ', 1)[0].strip()
+    lineData = line.split(': ', 1)[-1].strip()
+
+    # Line containing TAMP URL, Group, and Store
+    if lineTag.startswith('[A] 0x8'):
         print(certDataLines[loc+1])
 
-    if re.search('\[C\] 0x0', line) and re.search('\[C\] 0x0', certDataLines[loc+2]):
+    # This denotes a standard cert, included in the different groups and stores
+    if loc+4 < len(certDataLines) and lineTag == futureTag(certDataLines[loc+2]) == '[C] 0x0':
         if not re.search('BOOLEAN', certDataLines[loc+4]):
             if tempTemplate is not None:
                 certList.append(tempTemplate)
-            tempTemplate = x509Template(certDataLines[loc+4].split(': ',1)[1],int(certDataLines[loc+3].split(': ',1)[1]))
+            tempTemplate = x509Template(futureData(certDataLines[loc+4]),int(futureData(certDataLines[loc+3])))
             certFlag = True
+
+    # 1.2.840.113549.1.9.16.2.14 is the marking for the timestamped signed cert
     
     try:
         if re.search('rsaEncryption', line):
@@ -68,29 +87,30 @@ for loc, line in enumerate(certDataLines):
 
     if certFlag or certIssuerFlag:
         if re.search('UTCTIME', line):
-            tempTemplate.addDate(line.split(':', 1)[1])
+            tempTemplate.addDate(lineData)
         if re.search('countryName', line):
-            certFlagJoiner = 'Country:{},'.format(certDataLines[loc+1].split(': ', 1)[1])
+            certFlagJoiner = 'Country:{},'.format(futureData(certDataLines[loc+1]))
             tempTemplate.addIssuerOrSubject(certFlagJoiner, certIssuerFlag)
         if re.search('organizationName', line):
-            certFlagJoiner = 'ON:{}, '.format(certDataLines[loc+1].split(': ', 1)[1])
+            certFlagJoiner = 'ON:{}, '.format(futureData(certDataLines[loc+1]))
             tempTemplate.addIssuerOrSubject(certFlagJoiner, certIssuerFlag)
         if re.search('organizationalUnitName', line):
-            certFlagJoiner = 'OU:{}, '.format(certDataLines[loc+1].split(': ', 1)[1])
+            certFlagJoiner = 'OU:{}, '.format(futureData(certDataLines[loc+1]))
             tempTemplate.addIssuerOrSubject(certFlagJoiner, certIssuerFlag)
         if re.search('commonName', line):
-            certFlagJoiner = 'CN:{}'.format(certDataLines[loc+1].split(': ', 1)[1])
+            certFlagJoiner = 'CN:{}'.format(futureData(certDataLines[loc+1]))
             tempTemplate.addIssuerOrSubject(certFlagJoiner, certIssuerFlag)
             if not certIssuerFlag:
                 certIssuerFlag = True
-                # certFlagString += '^^^^^^^^^^\nCert Issuer\nCert\n\/\/\/\/\/\/\/\/\n'
             else:
                 certFlag = False
                 certIssuerFlag = False
 
     #print(line)
+
 for cert in certList:
     print('\nVersion:{}\nSerial Number: 0x{}'.format(cert.version, cert.certId))
     print('Issuer: {}\nValidity:'.format(cert.issuer))
     print('Not Before: {0[0]}\nNot After: {0[1]}'.format(cert.certDates))
     print('Subject: {}'.format(cert.subject))
+

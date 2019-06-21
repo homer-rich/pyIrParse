@@ -83,6 +83,9 @@ object_id_to_string_map = {
     "1.3.6.1.5.5.7.48.1.3": "crl",
     "1.3.6.1.5.5.7.48.1.5": "no-check",
 
+    "1.2.840.10045.2.1": "EC",
+    "1.2.840.10045.4.3.3": "SHA384withECDSA",
+
     "1.2.840.113549.1.1.1": "rsaEncryption",
     "1.2.840.113549.1.1.2": "md2WithRSAEncryption",
     "1.2.840.113549.1.1.3": "md4WithRSAEncryption",

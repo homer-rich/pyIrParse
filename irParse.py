@@ -5,7 +5,7 @@ import codecs
 import asn1
 from OpenSSL import crypto
 from time import strptime, strftime, gmtime
-# ipa houses some functions to print out the asn1 data and other functions
+# ipa houses some functions to print out the asn1 data and prune said data
 import irParseAsn1 as ipa
 
 certData = io.StringIO()
@@ -26,7 +26,7 @@ for loc, line in enumerate(certDataLines):
 
     # Signing time: 1.2.840.113549.1.9.5
     if '1.2.840.113549.1.9.5' in lineData:
-        signingTime = strftime('%B %d %Y %H:%M:%S UTC', strptime(str(ipa.futureData(certDataLines[loc+2])), "%y%m%d%H%M%SZ"))
+        signingTime = strftime('%B %d %Y %H:%M:%S UTC', strptime(str(ipa.futureData(certDataLines[loc+2])), '%y%m%d%H%M%SZ'))
 
     if '1.3.6.1.5.5.7.48.1.1' in lineData:
         pertinentAsn1Array.append(ipa.futureData([loc+1]))
@@ -48,15 +48,16 @@ findGroup = re.compile(r'(http.*;\w*)\\x02\\x04')
 findCertStarts = re.compile(r'(3412.{3,10}|7420.{2,15})A0820')
 findCertEnds = re.compile(r'A1820.{4}2820')
 
-print(f'This message was signed on: {signingTime}')
 count = 0
+certAndRawData = []
 for pertinentAsn1 in pertinentAsn1Array:
        
     # Prints the group for each signed section
     if len(pertinentAsn1) > 300:
         group = re.search(findGroup, str(codecs.decode(pertinentAsn1[2:300], 'hex')))
         if group:
-            print(group.group(1))
+            url,groupName,store = group.group(1).split(';')
+            #print(f'URL: {url}\nGroup: {groupName}\nStore: {store}')
 
     '''
     Trim off bytes denotation on the front and back of the pertinentAsn1 block and splits
@@ -65,7 +66,7 @@ for pertinentAsn1 in pertinentAsn1Array:
     possibleCerts = findCertStarts.split(pertinentAsn1[2:-1])
     for miniCertString in possibleCerts:
         try:
-            # If there certificate ending regex is found, stop on that byte, else go to end
+            # If the certificate ending regex is found, stop on that byte, else go to end
             searchEnd = re.search(findCertEnds, miniCertString)            
             if searchEnd:
                 certBytes = codecs.decode('30820{}'.format(miniCertString[:searchEnd.start()]), 'hex')
@@ -75,11 +76,22 @@ for pertinentAsn1 in pertinentAsn1Array:
             # Load the bytes into a cert, iterate the count and print any information.
             cert = crypto.load_certificate(crypto.FILETYPE_ASN1, certBytes)
             count = count + 1
-            print('{}, {:X}'.format(cert.get_subject(), cert.get_serial_number()))
+            certAndRawData.append([cert, certBytes, False if 'Remove' in store else True])
+            #print('{}, {:X}'.format(cert.get_subject(), cert.get_serial_number()))
             # Pretty Print whole cert
             #print (crypto.dump_certificate(crypto.FILETYPE_TEXT, cert).decode('utf-8'))
-            
         except Exception as e:
             #print(e)
             pass
-        
+
+print(f'Group: {groupName}')
+print(f'URL: {url}')
+print(f'This message was signed on: {signingTime}')
+print('Subject:{0:<20}Issuer:{0:<30}ID:{0:<9}Action:{0:<15}'.format(' '))
+for certTuple in certAndRawData:
+    cert = certTuple[0]
+    certSubject = cert.get_subject().get_components()[-1][1].decode()
+    certIssuer = cert.get_issuer().get_components()[-1][1].decode()
+    certSerialNum = hex(cert.get_serial_number())
+    certAction = 'Insert' if certTuple[2] else 'Remove'
+    print('{0:<30}{1:<40}{2:<9}{3:<15}'.format(certSubject, certIssuer, certSerialNum, certAction))

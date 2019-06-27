@@ -26,15 +26,18 @@ for loc, line in enumerate(certDataLines):
 
     # Signing time: 1.2.840.113549.1.9.5
     if '1.2.840.113549.1.9.5' in lineData:
-        signingTime = strftime('%B %d %Y %H:%M:%S UTC', strptime(str(ipa.futureData(certDataLines[loc+2])), '%y%m%d%H%M%SZ'))
+        signingTime = strftime('%B %d %Y %H:%M:%S UTC',  
+                strptime(str(ipa.futureData(certDataLines[loc+2])), '%y%m%d%H%M%SZ'))
 
     if '1.3.6.1.5.5.7.48.1.1' in lineData:
         pertinentAsn1Array.append(ipa.futureData([loc+1]))
 
-    if '2.16.840.1.101.2.1.2.77.3' in lineData and '2.16.840.1.101.3.4.2.1' in ipa.futureData(certDataLines[loc-2]):
+    if '2.16.840.1.101.2.1.2.77.3' in lineData and \
+        '2.16.840.1.101.3.4.2.1' in ipa.futureData(certDataLines[loc-2]):
         pertinentAsn1Array.append(ipa.futureData(certDataLines[loc+2]))
 
-# 302010202020 indicates an id of the cert
+# 302010202020 indicates an id of the cert in the file
+# 0030201020203 indicates an id of the signing cert
 '''findGroup is the Regex that searches for translated URL, Group, and Action that is nestled in 
     the first few hundred bytes of information in the data messages encoded in the TAMP Message
 
@@ -87,11 +90,12 @@ for pertinentAsn1 in pertinentAsn1Array:
 print(f'Group: {groupName}')
 print(f'URL: {url}')
 print(f'This message was signed on: {signingTime}')
-print('Subject:{0:<20}Issuer:{0:<30}ID:{0:<9}Action:{0:<15}'.format(' '))
+print('Subject:{0:<22}Issuer:{0:<33}ID:{0:<6}Action:{0:<15}'.format(' '))
 for certTuple in certAndRawData:
     cert = certTuple[0]
     certSubject = cert.get_subject().get_components()[-1][1].decode()
     certIssuer = cert.get_issuer().get_components()[-1][1].decode()
     certSerialNum = hex(cert.get_serial_number())
-    certAction = 'Insert' if certTuple[2] else 'Remove'
+    certAction = 'Insert' if certTuple[2] else 'Delete'
     print('{0:<30}{1:<40}{2:<9}{3:<15}'.format(certSubject, certIssuer, certSerialNum, certAction))
+

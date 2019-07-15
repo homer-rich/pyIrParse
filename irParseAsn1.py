@@ -1,5 +1,7 @@
 import binascii
 import asn1
+import codecs
+from OpenSSL import crypto
 
 tag_id_to_string_map = {
     asn1.Numbers.Boolean: "BOOLEAN",
@@ -65,6 +67,16 @@ def futureData(futureLine):
     except:
         # print('Failed Future Data')
         return ''
+
+def find_signature_cert(signerCertDict):
+    for signerCerts in signerCertDict:
+        for i in range(1000, 5000):
+            try:
+                return_cert = crypto.load_certificate(crypto.FILETYPE_ASN1, codecs.decode(signerCerts[:i], 'hex'))
+                return return_cert
+            except Exception as q:
+                pass
+
 
 def tag_id_to_string(identifier):
     """Return a string representation of a ASN.1 id."""

@@ -1,18 +1,23 @@
-from ctypes import CDLL, c_void_p, POINTER, c_byte, c_long, c_ulong, c_wchar_p, c_char_p, Structure, pointer, string_at, resize
+from ctypes import CDLL, c_void_p, POINTER, c_byte, c_long, c_ulong, c_wchar_p, c_char_p, Structure, pointer, string_at, resize, byref, WinDLL, FormatError, cast, create_unicode_buffer
+from ctypes.wintypes import LPCWSTR, LPSTR, DWORD, BOOL, BYTE, LPWSTR, LPCSTR
 import sys
+import tempfile
+import os
 
-BYTE = c_byte
-BOOL = c_long
-DWORD = c_ulong
 
 HCERTSTORE = PCCERT_INFO = PCCRL_INFO = c_void_p
-LPTCSTR = LPCWSTR = LPWSTR = c_wchar_p
-LPCSTR = LPSTR = c_char_p
-
-USE_LAST_ERROR = True
+LPTCSTR = LPCWSTR
 
 try:
-    from base64 import b64encode
+    from ctypes import get_last_error
+except ImportError:
+    from ctypes import GetLastError as get_last_error
+    USE_LAST_ERROR = False
+else:
+    USE_LAST_ERROR = True
+
+try:
+    from base64 import b64encode, b64decode
 except ImportError:
     # Python 2.3
     from binascii import b2a_base64
@@ -35,6 +40,11 @@ CRYPT_E_NOT_FOUND = -2146885628
 CERT_NAME_SIMPLE_DISPLAY_TYPE = 4
 CERT_NAME_FRIENDLY_DISPLAY_TYPE = 5
 CERT_NAME_ISSUER_FLAG = 0x1
+
+# cert store add
+CERT_STORE_ADD_NEW = 1
+CERT_STORE_ADD_USE_EXISTING = 2
+CERT_STORE_ADD_REPLACE_EXISTING = 3
 
 # OID mapping for enhanced key usage
 SERVER_AUTH = "1.3.6.1.5.5.7.3.1"
@@ -122,13 +132,11 @@ class CERT_CONTEXT(ContextStruct):
         return string_at(self.pbCertEncoded, self.cbCertEncoded)
 
     def _enhkey_error(self):
-        return True
-        #err = True 
-        #if err == CRYPT_E_NOT_FOUND:
-        #    return True
-        # errmsg = FormatError(err)
-        #raise OSError(err, errmsg)
-        raise Exception('Oh no!')
+        err = get_last_error() 
+        if err == CRYPT_E_NOT_FOUND:
+            return True
+        errmsg = FormatError(err)
+        raise OSError(err, errmsg)
 
     def _get_enhkey(self, flag):
         pCertCtx = pointer(self)
@@ -183,6 +191,9 @@ class CERT_CONTEXT(ContextStruct):
         cbsize = CertGetNameStringW(pCertCtx, typ, flag, None, buf, cbsize)
         return buf.value
 
+    def get_pCertCtx(self):
+        return pointer(self)
+
 
 class CRL_CONTEXT(ContextStruct):
     """Cert revocation list context
@@ -210,7 +221,10 @@ class CERT_ENHKEY_USAGE(Structure):
         ("rgpszUsageIdentifier", POINTER(LPSTR))
         ]
 
-crypt32 = CDLL('crypt32.dll', use_last_error=True)
+if USE_LAST_ERROR:
+    crypt32 = WinDLL('crypt32.dll', use_last_error=True)
+else:
+    crypt32 = WinDLL('crypt32.dll')
 
 CertOpenSystemStore = crypt32.CertOpenSystemStoreW
 CertOpenSystemStore.argtypes = [c_void_p, LPTCSTR]
@@ -241,6 +255,24 @@ CertGetNameStringW.argtypes = [PCCERT_CONTEXT, DWORD, DWORD, c_void_p,
                                LPWSTR, DWORD]
 CertGetNameStringW.restype = DWORD
 
+CertAddEncodedCertificateToStore = crypt32.CertAddEncodedCertificateToStore
+CertAddEncodedCertificateToStore.argtypes = [HCERTSTORE, DWORD, POINTER(BYTE), DWORD,
+                                            DWORD, PCCERT_CONTEXT]
+CertAddEncodedCertificateToStore.restype = BOOL
+
+CertDeleteCertificateFromStore = crypt32.CertDeleteCertificateFromStore
+CertDeleteCertificateFromStore.argtypes= [PCCERT_CONTEXT]
+CertDeleteCertificateFromStore.restype = BOOL
+
+CertFindCertificateInStore = crypt32.CertFindCertificateInStore
+CertFindCertificateInStore.argtypes = [HCERTSTORE, DWORD, DWORD, DWORD, c_void_p,
+                                        PCCERT_CONTEXT]
+CertFindCertificateInStore.restype = PCCERT_CONTEXT
+
+CertFreeCertificateContext = crypt32.CertFreeCertificateContext
+CertFreeCertificateContext.argtypes = [PCCERT_CONTEXT]
+CertFreeCertificateContext.restype = BOOL
+
 class CertSystemStore(object):
     """Wrapper for Window's cert system store
 
@@ -264,9 +296,8 @@ class CertSystemStore(object):
         self._hStore = CertOpenSystemStore(None, self.storename)
         if not self._hStore:  # NULL ptr
             self._hStore = None
-            # errmsg = FormatError(err)
-            #raise OSError(err, errmsg)
-            raise Exception('Oh no!')
+            errmsg = FormatError(get_last_error())
+            raise OSError(errmsg)
 
     def storename(self):
         """Get store name
@@ -290,7 +321,8 @@ class CertSystemStore(object):
         """
         pCertCtx = CertEnumCertificatesInStore(self._hStore, None)
         while pCertCtx:
-            certCtx = pCertCtx[0]
+            #certCtx = pCertCtx[0]
+            certCtx = pCertCtx.contents
             enhkey = certCtx.enhanced_keyusage()
             if usage is not None:
                 if enhkey is True or usage in enhkey:
@@ -298,7 +330,7 @@ class CertSystemStore(object):
             else:
                 yield certCtx
             pCertCtx = CertEnumCertificatesInStore(self._hStore, pCertCtx)
-
+        
     def itercrls(self):
         """Iterate over cert revocation lists
         """
@@ -314,79 +346,30 @@ class CertSystemStore(object):
         for crl in self.itercrls():
             yield crl
 
+    def AddCertToStore(self, cert):
+        certLen = len(cert)
+        certBytes = (c_byte*certLen)(*cert)
+        success = CertAddEncodedCertificateToStore(self._hStore, 0x1,
+                certBytes, certLen, CERT_STORE_ADD_NEW, None)
+        if success == 0:
+            errmsg = FormatError(get_last_error())
+            raise OSError(errmsg)
 
-class CertFile(object):
-    """Wrapper to handle a temporary file for a CA.pem
-
-    Note: The object uses a temporary file because older Python versions have
-          no means to keep a tempfile after it has been closed.
-
-    Usage:
-        import wincertstore
-        import atexit
-
-        certfile = wincertstore.CertFile()
-        certfile.addstore("CA")
-        certfile.addstore("ROOT")
-        atexit.register(certfile.close) # cleanup and remove files on shutdown)
-
-        ca_cert = certfile.name
-
-    """
-
-    def __init__(self, suffix="certstore"):
-        self._tempdir = tempfile.mkdtemp(suffix=suffix)
-        self._capem = os.path.join(self._tempdir, "ca.pem")
-
-    def name(self):
-        """Path to CA.pem
-        """
-        return self._capem
-
-    name = property(name)
-
-    def close(self):
-        shutil.rmtree(self._tempdir)
-        self._tempdir = None
-        self._capem = None
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc, value, tb):
-        self.close()
-
-    def addcerts(self, certs):
-        """Add certs to store
-        """
-        f = open(self._capem, "a")
-        try:
-            #f.seek(0, os.SEEK_END)
-            for cert in certs:
-                f.write(cert.get_pem())
-        finally:
-            f.close()
-
-    def addstore(self, store):
-        """Add store to CertFile
-
-        :param store: either a name of a store or a CertSystemStore instance
-        """
-        if hasattr(store, "itercerts"):
-            self.addcerts(store.itercerts())
+    def FindCertInStore(self, cert):
+        certFindExisting = 13 << 16
+        pCcertContext = CertFindCertificateInStore(self._hStore, 0x1, 0, 
+                        certFindExisting, byref(cert), None)
+        if not pCcertContext:
+            errmsg = FormatError(get_last_error())
+            print(errmsg)
         else:
-            store = CertSystemStore(store)
-            try:
-                self.addcerts(store.itercerts())
-            finally:
-                store.close()
+            print('Found it')
+        CertFreeCertificateContext(pCcertContext)
 
-    def read(self):
-        """Read CA.pem file and return content
-        """
-        f = open(self._capem, "r")
-        try:
-            return f.read()
-        finally:
-            f.close()
-
+    def RemoveCert(self, cert):
+        success = CertDeleteCertificateFromStore(byref(cert))
+        if success == 0:
+            errmsg = FormatError(get_last_error())
+            raise OSError(errmsg)
+        else:
+            print('Successfully removed Cert')

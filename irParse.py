@@ -5,11 +5,14 @@ import codecs
 import asn1
 import ssl
 from OpenSSL import crypto
-from time import strptime, strftime, gmtime
+from time import strptime, strftime, gmtime, mktime
 # ipa houses some functions to print out the asn1 data and prune said data
-import irParseAsn1 as ipa
+import IrParseAsn1 as ipa
 # rws houses the ability to access windows cert stores for comparison to the ir4 file
-import ReadWindowsStores as rws
+import os
+isWindows = os.name == 'nt'
+if isWindows:
+    import ReadWindowsStores as rws
 
 certData = io.StringIO()
 decoder = asn1.Decoder()
@@ -24,13 +27,16 @@ certDataLines = certDataString.splitlines()
 certData.close()
 
 pertinentAsn1Array = []
+signingTime = None
 for loc, line in enumerate(certDataLines):
     lineData = line.split(': ', 1)[-1].strip()
 
     # Signing time: 1.2.840.113549.1.9.5
-    if '1.2.840.113549.1.9.5' in lineData:
+    if '1.2.840.113549.1.9.5' in lineData and not signingTime:
+        time = strptime(str(ipa.futureData(certDataLines[loc+2])), '%y%m%d%H%M%SZ')
         signingTime = strftime('%B %d %Y %H:%M:%S UTC',  
                 strptime(str(ipa.futureData(certDataLines[loc+2])), '%y%m%d%H%M%SZ'))
+        print('Epoch Time for .reg files: {}'.format(int(mktime(time))))
 
     if '1.3.6.1.5.5.7.48.1.1' in lineData:
         pertinentAsn1Array.append(ipa.futureData([loc+1]))
@@ -97,24 +103,26 @@ for pertinentAsn1 in pertinentAsn1Array:
             pass
 
 windowsStore = []
-for storename in ("CA", "ROOT"):
-    store = rws.CertSystemStore(storename)
-    try:
-        for cert in store.itercerts():
-            windowsStore.append([crypto.load_certificate(crypto.FILETYPE_PEM, cert.get_pem().strip()), storename])
-            # print(cert.get_pem().strip())
-    finally:
-        store.close()
+storeCA = rws.CertSystemStore('CA')
+storeROOT = rws.CertSystemStore('ROOT')
+if isWindows:
+    for store in (storeCA, storeROOT):
+        try:
+            for cert in store.itercerts():
+                windowsStore.append([crypto.load_certificate(crypto.FILETYPE_PEM, cert.get_pem().strip()), 'CA', cert])
+                #print(cert.get_pem().strip())
+        except Exception as ex:
+            print(ex)
 
-for index,irCert in enumerate(certAndRawData):
-    for winCert in windowsStore: 
-        if winCert[0].digest('sha384') == irCert[0].digest('sha384'):
-            certAndRawData[index].append(winCert[1])
+    for index,irCert in enumerate(certAndRawData):
+        for winCert in windowsStore: 
+            if winCert[0].digest('sha384') == irCert[0].digest('sha384'):
+                certAndRawData[index].append(winCert[1])
 
 print(f'Group: {groupName}')
 print(f'URL: {url}')
 print(f'This message was signed on: {signingTime}')
-print('Subject:{0:<22}Issuer:{0:<33}ID:{0:<6}Action:{0:<7}In Store:'.format(' '))
+#print('Subject:{0:<22}Issuer:{0:<33}ID:{0:<6}Action:{0:<7}In Store:'.format(' '))
 for certTuple in certAndRawData:
     cert = certTuple[0]
     certSubject = cert.get_subject().get_components()[-1][1].decode()
@@ -124,6 +132,20 @@ for certTuple in certAndRawData:
     certStore = '--'
     if len(certTuple) > 3:
         certStore = certTuple[3]
-    print('{0:<30}{1:<40}{2:<9}{3:<14}{4}'.format(certSubject, certIssuer, certSerialNum, certAction, certStore))
+    #print('{0:<30}{1:<40}{2:<9}{3:<14}{4}'.format(certSubject, certIssuer, certSerialNum, certAction, certStore))
 
-
+if isWindows:
+    returnPointer = None
+    try:
+        for winCert in windowsStore:
+            if winCert[0].get_serial_number() == 28:
+                storeCA.FindCertInStore(winCert[2])
+            #if store.FindCertInStore(winCert[2]) == 'DoD Root CA 3':
+                #print(f'{winCert[0].get_serial_number()} #### {int("1c", 16)}')
+                print('Attempting to remove Cert')
+                storeCA.RemoveCert(winCert[2])
+    except Exception as ex:
+        print(ex)
+        
+storeCA.close()
+storeROOT.close()

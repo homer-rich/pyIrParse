@@ -4,6 +4,7 @@ import sys
 import codecs
 import asn1
 import ssl
+import pdb
 from OpenSSL import crypto
 from time import strptime, strftime, gmtime, mktime
 # ipa houses some functions to print out the asn1 data and prune said data
@@ -103,26 +104,26 @@ for pertinentAsn1 in pertinentAsn1Array:
             pass
 
 windowsStore = []
-storeCA = rws.CertSystemStore('CA')
-storeROOT = rws.CertSystemStore('ROOT')
+storeCA = rws.CertStore('CA')
+#storeROOT = rws.CertStore('ROOT')
 if isWindows:
-    for store in (storeCA, storeROOT):
-        try:
-            for cert in store.itercerts():
-                windowsStore.append([crypto.load_certificate(crypto.FILETYPE_PEM, cert.get_pem().strip()), 'CA', cert])
-                #print(cert.get_pem().strip())
-        except Exception as ex:
-            print(ex)
+    try:
+        for cert in storeCA.itercerts():
+            tempCryptoCert = crypto.load_certificate(crypto.FILETYPE_PEM, cert.get_pem().strip())
+            windowsStore.append([tempCryptoCert, 'CA'])
+    except Exception as ex:
+        print(ex)
 
-    for index,irCert in enumerate(certAndRawData):
-        for winCert in windowsStore: 
-            if winCert[0].digest('sha384') == irCert[0].digest('sha384'):
-                certAndRawData[index].append(winCert[1])
+for index,irCert in enumerate(certAndRawData):
+    for winCert in windowsStore: 
+        if winCert[0].digest('sha384') == irCert[0].digest('sha384'):
+            certAndRawData[index].append(winCert[1])
+
 
 print(f'Group: {groupName}')
 print(f'URL: {url}')
 print(f'This message was signed on: {signingTime}')
-#print('Subject:{0:<22}Issuer:{0:<33}ID:{0:<6}Action:{0:<7}In Store:'.format(' '))
+print('Subject:{0:<22}Issuer:{0:<33}ID:{0:<6}Action:{0:<7}In Store:'.format(' '))
 for certTuple in certAndRawData:
     cert = certTuple[0]
     certSubject = cert.get_subject().get_components()[-1][1].decode()
@@ -132,20 +133,30 @@ for certTuple in certAndRawData:
     certStore = '--'
     if len(certTuple) > 3:
         certStore = certTuple[3]
-    #print('{0:<30}{1:<40}{2:<9}{3:<14}{4}'.format(certSubject, certIssuer, certSerialNum, certAction, certStore))
+    print('{0:<30}{1:<40}{2:<9}{3:<14}{4}'.format(certSubject, certIssuer, certSerialNum, certAction, certStore))
+
+#storeCA.AddCertToStore(certAndRawData[-1][1])
+
+storeCA.close()
+del storeCA
+storeCA = rws.CertStore('CA')
+
 
 if isWindows:
-    returnPointer = None
     try:
-        for winCert in windowsStore:
-            if winCert[0].get_serial_number() == 28:
-                storeCA.FindCertInStore(winCert[2])
+        print(f'Total certs in Windows Store CA: {len(windowsStore)}')
+        for winCert in storeCA.itercerts():
+            tempCryptoCert = crypto.load_certificate(crypto.FILETYPE_PEM, winCert.get_pem().strip())
+            if tempCryptoCert.get_serial_number() == 28:
+                print('Located cert with serialNum 28')
+                print(winCert.get_name())
+                if storeCA.FindCertInStore(winCert):
             #if store.FindCertInStore(winCert[2]) == 'DoD Root CA 3':
                 #print(f'{winCert[0].get_serial_number()} #### {int("1c", 16)}')
-                print('Attempting to remove Cert')
-                storeCA.RemoveCert(winCert[2])
+                    print('Attempting to remove Cert')
+                    storeCA.RemoveCert(winCert)
     except Exception as ex:
         print(ex)
         
+#storeROOT.close()
 storeCA.close()
-storeROOT.close()

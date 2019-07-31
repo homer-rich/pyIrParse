@@ -1,8 +1,9 @@
 from ctypes import CDLL, c_void_p, POINTER, c_byte, c_long, c_ulong, c_wchar_p, c_char_p, Structure, pointer, string_at, resize, byref, WinDLL, FormatError, cast, create_unicode_buffer
-from ctypes.wintypes import LPCWSTR, LPSTR, DWORD, BOOL, BYTE, LPWSTR, LPCSTR
+from ctypes.wintypes import LPCWSTR, LPSTR, DWORD, BOOL, BYTE, LPWSTR, LPCSTR, PULONG
 import sys
 import tempfile
 import os
+import pdb
 
 
 HCERTSTORE = PCCERT_INFO = PCCRL_INFO = c_void_p
@@ -28,7 +29,9 @@ except ImportError:
 
 PY3 = sys.version_info[0] == 3
 
+X509_ASN_ENCODING = 0x1
 PKCS_7_ASN_ENCODING = 0x00010000
+MY_ENCODING = X509_ASN_ENCODING | PKCS_7_ASN_ENCODING
 
 # enhanced key usage
 CERT_FIND_EXT_ONLY_ENHKEY_USAGE_FLAG = 0x2
@@ -45,6 +48,47 @@ CERT_NAME_ISSUER_FLAG = 0x1
 CERT_STORE_ADD_NEW = 1
 CERT_STORE_ADD_USE_EXISTING = 2
 CERT_STORE_ADD_REPLACE_EXISTING = 3
+
+# cert store find
+CERT_COMPARE_EXISTING = 13
+CERT_COMPARE_SHIFT = 16
+CERT_FIND_EXISTING = CERT_COMPARE_EXISTING << CERT_COMPARE_SHIFT
+
+# cert store open
+CERT_STORE_PROV_PHYSICAL = LPCSTR(14)
+CERT_STORE_PROV_SYSTEM= LPCSTR(10)
+#low
+CERT_STORE_OPEN_EXISTING_FLAG = 0x4000
+CERT_STORE_READONLY_FLAG = 0x8000
+CERT_STORE_DELETE_FLAG = 0x10
+
+#high
+CERT_SYSTEM_STORE_CURRENT_USER_ID = 1
+CERT_SYSTEM_STORE_LOCAL_MACHINE_ID = 2
+CERT_SYSTEM_STORE_CURRENT_SERVICE_ID = 4
+CERT_SYSTEM_STORE_SERVICES_ID = 5
+CERT_SYSTEM_STORE_USERS_ID = 6
+CERT_SYSTEM_STORE_CURRENT_USER_GROUP_POLICY_ID = 7
+CERT_SYSTEM_STORE_LOCAL_MACHINE_GROUP_POLICY_ID = 8
+CERT_SYSTEM_STORE_LOCAL_MACHINE_ENTERPRISE_ID = 9
+CERT_SYSTEM_STORE_LOCATION_SHIFT = 16
+
+CERT_SYSTEM_STORE_CURRENT_USER = \
+    (CERT_SYSTEM_STORE_CURRENT_USER_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT)
+CERT_SYSTEM_STORE_LOCAL_MACHINE = \
+    (CERT_SYSTEM_STORE_LOCAL_MACHINE_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT)
+CERT_SYSTEM_STORE_CURRENT_SERVICE = \
+    (CERT_SYSTEM_STORE_CURRENT_SERVICE_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT)
+CERT_SYSTEM_STORE_SERVICES = \
+    (CERT_SYSTEM_STORE_SERVICES_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT)
+CERT_SYSTEM_STORE_USERS = \
+    (CERT_SYSTEM_STORE_USERS_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT)
+CERT_SYSTEM_STORE_CURRENT_USER_GROUP_POLICY = \
+    (CERT_SYSTEM_STORE_CURRENT_USER_GROUP_POLICY_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT)
+CERT_SYSTEM_STORE_LOCAL_MACHINE_GROUP_POLICY = \
+    (CERT_SYSTEM_STORE_LOCAL_MACHINE_GROUP_POLICY_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT)
+CERT_SYSTEM_STORE_LOCAL_MACHINE_ENTERPRISE = \
+    (CERT_SYSTEM_STORE_LOCAL_MACHINE_ENTERPRISE_ID << CERT_SYSTEM_STORE_LOCATION_SHIFT)
 
 # OID mapping for enhanced key usage
 SERVER_AUTH = "1.3.6.1.5.5.7.3.1"
@@ -230,6 +274,12 @@ CertOpenSystemStore = crypt32.CertOpenSystemStoreW
 CertOpenSystemStore.argtypes = [c_void_p, LPTCSTR]
 CertOpenSystemStore.restype = HCERTSTORE
 
+HCRYPTPROV_LEGACY = PULONG
+CertOpenStore = crypt32.CertOpenStore
+CertOpenStore.argtypes = [LPCSTR, DWORD, HCRYPTPROV_LEGACY,
+                            DWORD, c_void_p]
+CertOpenStore.restype = HCERTSTORE
+
 CertCloseStore = crypt32.CertCloseStore
 CertCloseStore.argtypes = [HCERTSTORE, DWORD]
 CertCloseStore.restype = BOOL
@@ -273,7 +323,11 @@ CertFreeCertificateContext = crypt32.CertFreeCertificateContext
 CertFreeCertificateContext.argtypes = [PCCERT_CONTEXT]
 CertFreeCertificateContext.restype = BOOL
 
-class CertSystemStore(object):
+CertDuplicateCertificateContext = crypt32.CertDuplicateCertificateContext
+CertDuplicateCertificateContext.argtypes = [PCCERT_CONTEXT]
+CertDuplicateCertificateContext.restype = PCCERT_CONTEXT
+
+class CertStore(object):
     """Wrapper for Window's cert system store
 
     http://msdn.microsoft.com/en-us/library/windows/desktop/aa376560%28v=vs.85%29.aspx
@@ -293,7 +347,10 @@ class CertSystemStore(object):
 
     def __init__(self, storename):
         self._storename = storename
-        self._hStore = CertOpenSystemStore(None, self.storename)
+        #self._hStore = CertOpenSystemStore(None, self.storename)
+        self._hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, None,
+                CERT_SYSTEM_STORE_LOCAL_MACHINE | CERT_STORE_OPEN_EXISTING_FLAG | 0x1000,
+                self._storename)
         if not self._hStore:  # NULL ptr
             self._hStore = None
             errmsg = FormatError(get_last_error())
@@ -307,7 +364,12 @@ class CertSystemStore(object):
     storename = property(storename)
 
     def close(self):
-        CertCloseStore(self._hStore, 0)
+        success = CertCloseStore(self._hStore, 0x2)
+        if success == 0:
+            errmsg = FormatError(get_last_error())
+            raise OSError(errmsg)
+        else:
+            print('Store successfully closed')
         self._hStore = None
 
     def __enter__(self):
@@ -321,14 +383,16 @@ class CertSystemStore(object):
         """
         pCertCtx = CertEnumCertificatesInStore(self._hStore, None)
         while pCertCtx:
-            #certCtx = pCertCtx[0]
-            certCtx = pCertCtx.contents
+            certCtx = pCertCtx[0]
+            #certCtx = pCertCtx.contents
+            '''
             enhkey = certCtx.enhanced_keyusage()
             if usage is not None:
                 if enhkey is True or usage in enhkey:
                     yield certCtx
             else:
-                yield certCtx
+            '''
+            yield certCtx
             pCertCtx = CertEnumCertificatesInStore(self._hStore, pCertCtx)
         
     def itercrls(self):
@@ -349,25 +413,28 @@ class CertSystemStore(object):
     def AddCertToStore(self, cert):
         certLen = len(cert)
         certBytes = (c_byte*certLen)(*cert)
-        success = CertAddEncodedCertificateToStore(self._hStore, 0x1,
+        success = CertAddEncodedCertificateToStore(self._hStore, X509_ASN_ENCODING,
                 certBytes, certLen, CERT_STORE_ADD_NEW, None)
         if success == 0:
             errmsg = FormatError(get_last_error())
             raise OSError(errmsg)
 
     def FindCertInStore(self, cert):
-        certFindExisting = 13 << 16
-        pCcertContext = CertFindCertificateInStore(self._hStore, 0x1, 0, 
-                        certFindExisting, byref(cert), None)
+        pCcertContext = CertFindCertificateInStore(self._hStore, X509_ASN_ENCODING, 0, 
+                        CERT_FIND_EXISTING, cert.get_pCertCtx(), None)
         if not pCcertContext:
             errmsg = FormatError(get_last_error())
             print(errmsg)
+            CertFreeCertificateContext(pCcertContext)
+            return False
         else:
             print('Found it')
-        CertFreeCertificateContext(pCcertContext)
+            CertFreeCertificateContext(pCcertContext)
+            return True
 
     def RemoveCert(self, cert):
-        success = CertDeleteCertificateFromStore(byref(cert))
+        dupePointer = CertDuplicateCertificateContext(pointer(cert))
+        success = CertDeleteCertificateFromStore(dupePointer)
         if success == 0:
             errmsg = FormatError(get_last_error())
             raise OSError(errmsg)

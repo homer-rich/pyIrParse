@@ -61,7 +61,6 @@ CERT_STORE_PROV_SYSTEM= LPCSTR(10)
 CERT_STORE_OPEN_EXISTING_FLAG = 0x4000
 CERT_STORE_READONLY_FLAG = 0x8000
 CERT_STORE_DELETE_FLAG = 0x10
-
 #high
 CERT_SYSTEM_STORE_CURRENT_USER_ID = 1
 CERT_SYSTEM_STORE_LOCAL_MACHINE_ID = 2
@@ -330,8 +329,6 @@ CertDuplicateCertificateContext.restype = PCCERT_CONTEXT
 class CertStore(object):
     """Wrapper for Window's cert system store
 
-    http://msdn.microsoft.com/en-us/library/windows/desktop/aa376560%28v=vs.85%29.aspx
-
     store names
     -----------
     CA:
@@ -347,7 +344,6 @@ class CertStore(object):
 
     def __init__(self, storename):
         self._storename = storename
-        #self._hStore = CertOpenSystemStore(None, self.storename)
         self._hStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, None,
                 CERT_SYSTEM_STORE_LOCAL_MACHINE | CERT_STORE_OPEN_EXISTING_FLAG | 0x1000,
                 self._storename)
@@ -357,13 +353,13 @@ class CertStore(object):
             raise OSError(errmsg)
 
     def storename(self):
-        """Get store name
-        """
+        """Get store name."""
         return self._storename
 
     storename = property(storename)
 
     def close(self):
+        """Close a Windows store, checks to make sure all certs are mem freed."""
         success = CertCloseStore(self._hStore, 0x2)
         if success == 0:
             errmsg = FormatError(get_last_error())
@@ -379,25 +375,15 @@ class CertStore(object):
         self.close()
 
     def itercerts(self, usage=SERVER_AUTH):
-        """Iterate over certificates
-        """
+        """Iterate over certificates."""
         pCertCtx = CertEnumCertificatesInStore(self._hStore, None)
         while pCertCtx:
             certCtx = pCertCtx[0]
-            #certCtx = pCertCtx.contents
-            '''
-            enhkey = certCtx.enhanced_keyusage()
-            if usage is not None:
-                if enhkey is True or usage in enhkey:
-                    yield certCtx
-            else:
-            '''
             yield certCtx
             pCertCtx = CertEnumCertificatesInStore(self._hStore, pCertCtx)
         
     def itercrls(self):
-        """Iterate over cert revocation lists
-        """
+        """Iterate over cert revocation lists."""
         pCrlCtx = CertEnumCRLsInStore(self._hStore, None)
         while pCrlCtx:
             crlCtx = pCrlCtx[0]
@@ -410,33 +396,48 @@ class CertStore(object):
         for crl in self.itercrls():
             yield crl
 
-    def AddCertToStore(self, cert):
-        certLen = len(cert)
-        certBytes = (c_byte*certLen)(*cert)
+    def AddCertToStore(self, x509cert):
+        """Adds a x509 encoded certificate to the Windows store."""
+        certLen = len(x509cert)
+        certBytes = (c_byte*certLen)(*x509cert)
         success = CertAddEncodedCertificateToStore(self._hStore, X509_ASN_ENCODING,
                 certBytes, certLen, CERT_STORE_ADD_NEW, None)
         if success == 0:
             errmsg = FormatError(get_last_error())
             raise OSError(errmsg)
 
-    def FindCertInStore(self, cert):
+    def FindCertInStore(self, certContext):
+        """Returns true if a cert exists in the store."""
         pCcertContext = CertFindCertificateInStore(self._hStore, X509_ASN_ENCODING, 0, 
-                        CERT_FIND_EXISTING, cert.get_pCertCtx(), None)
+                        CERT_FIND_EXISTING, certContext.get_pCertCtx(), None)
         if not pCcertContext:
             errmsg = FormatError(get_last_error())
             print(errmsg)
-            CertFreeCertificateContext(pCcertContext)
             return False
         else:
-            print('Found it')
             CertFreeCertificateContext(pCcertContext)
             return True
 
-    def RemoveCert(self, cert):
-        dupePointer = CertDuplicateCertificateContext(pointer(cert))
+    def RemoveCert(self, certContext):
+        """Remove a cert from Windows store.
+
+        Arguments:
+        certContext -- a CERT_CONTEXT to be deleted
+
+        returns True if successful
+        """
+        '''Following steps according to:
+        https://docs.microsoft.com/en-us/windows/win32/api/wincrypt
+
+        You must first create a duplicate pointer oterwise when deleting the cert
+        the pointer loses all reference and the program will crash.
+
+        '''
+        dupePointer = CertDuplicateCertificateContext(pointer(certContext))
         success = CertDeleteCertificateFromStore(dupePointer)
         if success == 0:
             errmsg = FormatError(get_last_error())
             raise OSError(errmsg)
         else:
             print('Successfully removed Cert')
+            return True

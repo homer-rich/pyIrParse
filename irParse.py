@@ -28,16 +28,14 @@ certDataLines = certDataString.splitlines()
 certData.close()
 
 pertinentAsn1Array = []
-signingTime = None
+signingTime = [] 
 for loc, line in enumerate(certDataLines):
     lineData = line.split(': ', 1)[-1].strip()
 
     # Signing time: 1.2.840.113549.1.9.5
-    if '1.2.840.113549.1.9.5' in lineData and not signingTime:
+    if '1.2.840.113549.1.9.5' in lineData:
         time = strptime(str(ipa.futureData(certDataLines[loc+2])), '%y%m%d%H%M%SZ')
-        signingTime = strftime('%B %d %Y %H:%M:%S UTC',  
-                strptime(str(ipa.futureData(certDataLines[loc+2])), '%y%m%d%H%M%SZ'))
-        print('Epoch Time for .reg files: {}'.format(int(mktime(time))))
+        signingTime.append([strftime('%B %d %Y %H:%M:%S UTC', time), int(mktime(time))])
 
     if '1.3.6.1.5.5.7.48.1.1' in lineData:
         pertinentAsn1Array.append(ipa.futureData([loc+1]))
@@ -103,26 +101,37 @@ for pertinentAsn1 in pertinentAsn1Array:
             #print(e)
             pass
 
-windowsStore = []
-storeCA = rws.CertStore('CA')
-#storeROOT = rws.CertStore('ROOT')
+
 if isWindows:
     try:
-        for cert in storeCA.itercerts():
-            tempCryptoCert = crypto.load_certificate(crypto.FILETYPE_PEM, cert.get_pem().strip())
-            windowsStore.append([tempCryptoCert, 'CA'])
+        windowsStore = []
+        storeCA = rws.CertStore('CA')
+        storeROOT = rws.CertStore('ROOT')
+        ''' Adding a cert to a store for testing.
+        storeROOT.AddCertToStore(certAndRawData[-1][1])
+        '''
+        for store in (storeCA, storeROOT):
+            for cert in store.itercerts():
+                tempCryptoCert = crypto.load_certificate(crypto.FILETYPE_PEM,
+                        cert.get_pem().strip())
+                windowsStore.append([tempCryptoCert, store.storename])
+        
+        storeCA.close()
+        storeROOT.close()
+        del storeCA, storeROOT
     except Exception as ex:
         print(ex)
 
-for index,irCert in enumerate(certAndRawData):
-    for winCert in windowsStore: 
-        if winCert[0].digest('sha384') == irCert[0].digest('sha384'):
-            certAndRawData[index].append(winCert[1])
+    for index,irCert in enumerate(certAndRawData):
+        for winCert in windowsStore: 
+            if winCert[0].digest('sha384') == irCert[0].digest('sha384'):
+                certAndRawData[index].append(winCert[1])
 
 
 print(f'Group: {groupName}')
 print(f'URL: {url}')
-print(f'This message was signed on: {signingTime}')
+print(f'This message was signed on: {signingTime[0][0]}')
+# print(f'Epoch Time for .reg files: {signingTime[0][1]}')
 print('Subject:{0:<22}Issuer:{0:<33}ID:{0:<6}Action:{0:<7}In Store:'.format(' '))
 for certTuple in certAndRawData:
     cert = certTuple[0]
@@ -133,30 +142,26 @@ for certTuple in certAndRawData:
     certStore = '--'
     if len(certTuple) > 3:
         certStore = certTuple[3]
-    print('{0:<30}{1:<40}{2:<9}{3:<14}{4}'.format(certSubject, certIssuer, certSerialNum, certAction, certStore))
+    print('{0:<30}{1:<40}{2:<9}{3:<14}{4}'.format(certSubject, certIssuer,
+        certSerialNum, certAction, certStore))
 
-#storeCA.AddCertToStore(certAndRawData[-1][1])
-
-storeCA.close()
-del storeCA
-storeCA = rws.CertStore('CA')
-
-
+'''
 if isWindows:
+    storeCA = rws.CertStore('CA')
+    storeROOT = rws.CertStore('ROOT')
     try:
-        print(f'Total certs in Windows Store CA: {len(windowsStore)}')
-        for winCert in storeCA.itercerts():
+        for winCert in storeROOT.itercerts():
             tempCryptoCert = crypto.load_certificate(crypto.FILETYPE_PEM, winCert.get_pem().strip())
             if tempCryptoCert.get_serial_number() == 28:
                 print('Located cert with serialNum 28')
                 print(winCert.get_name())
-                if storeCA.FindCertInStore(winCert):
-            #if store.FindCertInStore(winCert[2]) == 'DoD Root CA 3':
-                #print(f'{winCert[0].get_serial_number()} #### {int("1c", 16)}')
+                if storeROOT.FindCertInStore(winCert):
                     print('Attempting to remove Cert')
-                    storeCA.RemoveCert(winCert)
+                    storeROOT.RemoveCert(winCert)
+
+        storeROOT.close()
+        storeCA.close()
+        del storeCA, storeROOT
     except Exception as ex:
         print(ex)
-        
-#storeROOT.close()
-storeCA.close()
+'''        

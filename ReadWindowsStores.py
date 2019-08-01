@@ -4,6 +4,10 @@ import sys
 import tempfile
 import os
 import pdb
+import logging
+
+
+log = logging.getLogger('ReadWindowsStore')
 
 
 HCERTSTORE = PCCERT_INFO = PCCRL_INFO = c_void_p
@@ -365,7 +369,7 @@ class CertStore(object):
             errmsg = FormatError(get_last_error())
             raise OSError(errmsg)
         else:
-            print('Store successfully closed')
+            log.info(f'Store "{self._storename}" successfully closed')
         self._hStore = None
 
     def __enter__(self):
@@ -412,7 +416,7 @@ class CertStore(object):
                         CERT_FIND_EXISTING, certContext.get_pCertCtx(), None)
         if not pCcertContext:
             errmsg = FormatError(get_last_error())
-            print(errmsg)
+            log.error(errmsg)
             return False
         else:
             CertFreeCertificateContext(pCcertContext)
@@ -439,5 +443,5 @@ class CertStore(object):
             errmsg = FormatError(get_last_error())
             raise OSError(errmsg)
         else:
-            print('Successfully removed Cert')
+            log.info(f'Successfully removed Cert: {certContext.get_name()}')
             return True

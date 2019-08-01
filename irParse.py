@@ -5,6 +5,7 @@ import codecs
 import asn1
 import ssl
 import pdb
+import logging
 from OpenSSL import crypto
 from time import strptime, strftime, gmtime, mktime
 # ipa houses some functions to print out the asn1 data and prune said data
@@ -14,6 +15,10 @@ import os
 isWindows = os.name == 'nt'
 if isWindows:
     import ReadWindowsStores as rws
+
+logging.basicConfig(format='#### %(asctime)s %(name)s %(levelname)s: %(message)s',
+                    datefmt='%m-%d %H:%M', level=logging.WARNING)
+log = logging.getLogger('IR_Parse')
 
 certData = io.StringIO()
 decoder = asn1.Decoder()
@@ -98,7 +103,7 @@ for pertinentAsn1 in pertinentAsn1Array:
             # Pretty Print whole cert
             #print (crypto.dump_certificate(crypto.FILETYPE_TEXT, cert).decode('utf-8'))
         except Exception as e:
-            #print(e)
+            log.error(e)
             pass
 
 
@@ -120,7 +125,7 @@ if isWindows:
         storeROOT.close()
         del storeCA, storeROOT
     except Exception as ex:
-        print(ex)
+        log.error(ex)
 
     for index,irCert in enumerate(certAndRawData):
         for winCert in windowsStore: 
@@ -146,6 +151,7 @@ for certTuple in certAndRawData:
         certSerialNum, certAction, certStore))
 
 '''
+'''        
 if isWindows:
     storeCA = rws.CertStore('CA')
     storeROOT = rws.CertStore('ROOT')
@@ -153,15 +159,12 @@ if isWindows:
         for winCert in storeROOT.itercerts():
             tempCryptoCert = crypto.load_certificate(crypto.FILETYPE_PEM, winCert.get_pem().strip())
             if tempCryptoCert.get_serial_number() == 28:
-                print('Located cert with serialNum 28')
-                print(winCert.get_name())
                 if storeROOT.FindCertInStore(winCert):
-                    print('Attempting to remove Cert')
+                    log.info('Attempting to remove Cert')
                     storeROOT.RemoveCert(winCert)
 
         storeROOT.close()
         storeCA.close()
         del storeCA, storeROOT
     except Exception as ex:
-        print(ex)
-'''        
+        log.error(ex)
